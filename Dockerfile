@@ -12,6 +12,9 @@ RUN npm ci --legacy-peer-deps
 
 COPY . .
 
+ARG VITE_CINE_API_URL
+ENV VITE_CINE_API_URL=$VITE_CINE_API_URL
+
 RUN npm run build -- --mode prod
 
 FROM nginxinc/nginx-unprivileged:1.28-alpine as production
