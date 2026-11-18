@@ -46,3 +46,58 @@ jobs:
         run: |
           docker push ${{ env.IMAGEN }}
           echo "Imagen del frontend subida a DockerHub: ${{ env.IMAGEN }}"
+
+  despliegue:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: desplegar-y-verificar-con-rollback
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -e
+            cd /opt/cine-app
+            NEW_TAG="${{ github.sha }}"
+            PREV_TAG=$(grep '^FRONTEND_TAG=' .env | cut -d '=' -f2)
+            echo "Version anterior frontend: $PREV_TAG"
+            echo "Nueva version frontend: $NEW_TAG"
+
+            rollback() {
+              echo "Fallo detectado en frontend. Ejecutando rollback a $PREV_TAG..."
+              sed -i "s/^FRONTEND_TAG=.*/FRONTEND_TAG=$PREV_TAG/" .env
+              docker compose up -d frontend
+              exit 1
+            }
+
+            sed -i "s/^FRONTEND_TAG=.*/FRONTEND_TAG=$NEW_TAG/" .env
+            docker compose pull frontend || rollback
+            docker compose up -d frontend || rollback
+
+            echo "Esperando verificacion de salud de cine_frontend_prod..."
+            HEALTHY=false
+            for i in $(seq 1 12); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' cine_frontend_prod 2>/dev/null || echo "starting")
+              echo "Intento $i/12 - Estado contenedor: $STATUS"
+              if [ "$STATUS" = "healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+              sleep 5
+            done
+
+            if [ "$HEALTHY" != "true" ]; then
+              rollback
+            fi
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+            echo "Respuesta HTTP frontend (http://localhost:8080/): $HTTP_CODE"
+            if [ "$HTTP_CODE" != "200" ]; then
+              rollback
+            fi
+
+            echo "Despliegue de frontend exitoso y verificado. Versiones locales conservadas:"
+            docker images | grep pamebren/frontend-cine
