@@ -1,0 +1,27 @@
+name: CI frontend cine
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGEN: ${{ secrets.DOCKER_USERNAME }}/frontend-cine:${{ github.sha }}
+
+jobs:
+  verificacion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: instalar-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: instalar-dependencias
+        run: npm ci --legacy-peer-deps
+
+      - name: verificar-tipos
+        run: npm run typecheck
